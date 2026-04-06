@@ -69,30 +69,22 @@ class MainActivity : FragmentActivity() {
                     if (isAuthenticated) {
                         AppNavigation(appPreferences)
                     } else {
+                        // Pantalla totalmente vacía (negro/blanco según el modo)
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.primary),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    Icons.Default.Lock,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(64.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    "Bóveda Protegida",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            }
-                        }
+                                .background(MaterialTheme.colorScheme.background)
+                        )
                     }
                 }
             }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) {
+            isAuthenticated = false
         }
     }
 
