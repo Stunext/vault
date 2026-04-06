@@ -11,7 +11,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,7 +21,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -40,8 +38,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.stunext.vault.ui.theme.VaultTheme
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class AppInfo(
     val name: String,
@@ -53,6 +52,7 @@ class MainActivity : FragmentActivity() {
 
     private lateinit var appPreferences: AppPreferences
     private var isAuthenticated by mutableStateOf(false)
+    private var allApps by mutableStateOf<List<AppInfo>?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,29 +62,26 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             VaultTheme {
+                // Cargamos las apps una sola vez al inicio
+                LaunchedEffect(Unit) {
+                    val apps = withContext(Dispatchers.IO) { getInstalledApps(this@MainActivity) }
+                    allApps = apps
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     if (isAuthenticated) {
-                        AppNavigation(appPreferences)
+                        AppNavigation(appPreferences, allApps)
                     } else {
-                        // Pantalla totalmente vacía (negro/blanco según el modo)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.background)
-                        )
+                        // Pantalla de espera mientras se autentica
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
                     }
                 }
             }
-        }
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus) {
-            isAuthenticated = false
         }
     }
 
@@ -95,14 +92,16 @@ class MainActivity : FragmentActivity() {
                 if (success) {
                     isAuthenticated = true
                 } else {
-                    finish()
+                    // Si el usuario cancela, no permitimos entrar
+                    // finish() 
                 }
             }
         }
     }
 
-    override fun onPause() {
-        super.onPause()
+    override fun onStop() {
+        super.onStop()
+        // Al ocultarse totalmente, marcamos como no autenticado
         isAuthenticated = false
     }
 
@@ -122,9 +121,6 @@ class MainActivity : FragmentActivity() {
 
                         override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                             super.onAuthenticationError(errorCode, errString)
-                            if (errorCode != BiometricPrompt.ERROR_USER_CANCELED) {
-                                Toast.makeText(this@MainActivity, errString, Toast.LENGTH_SHORT).show()
-                            }
                             onResult(false)
                         }
 
@@ -134,33 +130,33 @@ class MainActivity : FragmentActivity() {
                     })
 
                 val promptInfo = BiometricPrompt.PromptInfo.Builder()
-                    .setTitle("Authentication required")
-                    .setSubtitle("Use your biometrics to access your vault")
+                    .setTitle("Acceso Protegido")
+                    .setSubtitle("Usa tu huella para entrar")
                     .setAllowedAuthenticators(authenticators)
                     .build()
 
                 biometricPrompt.authenticate(promptInfo)
             }
-            else -> {
-                onResult(true)
-            }
+            else -> onResult(true)
         }
     }
 }
 
 @Composable
-fun AppNavigation(appPreferences: AppPreferences) {
+fun AppNavigation(appPreferences: AppPreferences, allApps: List<AppInfo>?) {
     val navController = rememberNavController()
     NavHost(navController = navController, startDestination = "main") {
         composable("main") {
             MainScreen(
                 appPreferences = appPreferences,
+                allApps = allApps,
                 onSettingsClick = { navController.navigate("settings") }
             )
         }
         composable("settings") {
             SettingsScreen(
                 appPreferences = appPreferences,
+                allApps = allApps,
                 onBack = { navController.popBackStack() }
             )
         }
@@ -169,15 +165,10 @@ fun AppNavigation(appPreferences: AppPreferences) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(appPreferences: AppPreferences, onSettingsClick: () -> Unit) {
+fun MainScreen(appPreferences: AppPreferences, allApps: List<AppInfo>?, onSettingsClick: () -> Unit) {
     val context = LocalContext.current
-    val selectedPackageNames by appPreferences.selectedApps.collectAsState(initial = emptySet())
-    var allApps by remember { mutableStateOf<List<AppInfo>?>(null) }
-
-    LaunchedEffect(Unit) {
-        delay(800)
-        allApps = getInstalledApps(context)
-    }
+    // Iniciamos con null para saber que aún se están cargando las preferencias
+    val selectedPackageNames by appPreferences.selectedApps.collectAsState(initial = null)
 
     Scaffold(
         topBar = {
@@ -191,16 +182,17 @@ fun MainScreen(appPreferences: AppPreferences, onSettingsClick: () -> Unit) {
             )
         }
     ) { padding ->
-        val currentAllApps = allApps
-        if (currentAllApps == null) {
+        val currentSelected = selectedPackageNames
+        
+        if (allApps == null || currentSelected == null) {
             Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         } else {
-            val selectedApps = currentAllApps.filter { it.packageName in selectedPackageNames }
+            val selectedApps = allApps.filter { it.packageName in currentSelected }
             if (selectedApps.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                    Text("No apps selected.\nGo to settings.", textAlign = TextAlign.Center)
+                    Text("No hay apps seleccionadas.\nVe a ajustes.", textAlign = TextAlign.Center)
                 }
             } else {
                 LazyVerticalGrid(
@@ -221,47 +213,37 @@ fun MainScreen(appPreferences: AppPreferences, onSettingsClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(appPreferences: AppPreferences, onBack: () -> Unit) {
-    val context = LocalContext.current
+fun SettingsScreen(appPreferences: AppPreferences, allApps: List<AppInfo>?, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var allApps by remember { mutableStateOf<List<AppInfo>?>(null) }
-    val selectedPackageNames by appPreferences.selectedApps.collectAsState(initial = emptySet())
-
-    LaunchedEffect(Unit) {
-        delay(600)
-        allApps = getInstalledApps(context).sortedBy { it.name.lowercase() }
-    }
+    val selectedPackageNames by appPreferences.selectedApps.collectAsState(initial = null)
 
     Scaffold(
         topBar = {
-            if (allApps != null) {
-                TopAppBar(
-                    title = { Text("Select Apps") },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
+            TopAppBar(
+                title = { Text("Seleccionar Apps") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                )
-            }
+                }
+            )
         },
         floatingActionButton = {
-            if (allApps != null) {
-                FloatingActionButton(onClick = onBack) {
-                    Icon(Icons.Default.Check, contentDescription = "Save")
-                }
+            FloatingActionButton(onClick = onBack) {
+                Icon(Icons.Default.Check, contentDescription = "Save")
             }
         }
     ) { padding ->
-        val currentAllApps = allApps
-        if (currentAllApps == null) {
+        val currentSelected = selectedPackageNames
+        if (allApps == null || currentSelected == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         } else {
+            val sortedApps = remember(allApps) { allApps.sortedBy { it.name.lowercase() } }
             LazyColumn(modifier = Modifier.padding(padding).fillMaxSize()) {
-                items(currentAllApps) { app ->
-                    val isSelected = app.packageName in selectedPackageNames
+                items(sortedApps) { app ->
+                    val isSelected = app.packageName in currentSelected
                     ListItem(
                         headlineContent = { Text(app.name) },
                         supportingContent = { Text(app.packageName) },
@@ -283,9 +265,9 @@ fun SettingsScreen(appPreferences: AppPreferences, onBack: () -> Unit) {
                         modifier = Modifier.clickable {
                             scope.launch {
                                 val newSelection = if (!isSelected) {
-                                    selectedPackageNames + app.packageName
+                                    currentSelected + app.packageName
                                 } else {
-                                    selectedPackageNames - app.packageName
+                                    currentSelected - app.packageName
                                 }
                                 appPreferences.saveSelectedApps(newSelection)
                             }
@@ -342,6 +324,6 @@ private fun launchApp(context: Context, packageName: String) {
     if (launchIntent != null) {
         context.startActivity(launchIntent)
     } else {
-        Toast.makeText(context, "Cannot open app", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "No se puede abrir la app", Toast.LENGTH_SHORT).show()
     }
 }
