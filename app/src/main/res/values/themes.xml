@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Usamos DayNight para que el sistema respete el modo oscuro desde el arranque -->
+    <style name="Theme.Vault" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Esto ayuda a que el fondo inicial no sea blanco puro si el sistema está en oscuro -->
+        <item name="android:windowBackground">?android:attr/colorBackground</item>
+    </style>
+</resources>
